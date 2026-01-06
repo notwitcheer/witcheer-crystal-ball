@@ -23,6 +23,9 @@ python-telegram-bot>=21.0  # Telegram bot API (async native in v21+)
 # === Configuration ===
 python-dotenv>=1.0.0       # Load .env files into environment variables
 
+# === Security ===
+cryptography>=42.0.0       # Encryption for secure secrets storage
+
 # === Logging ===
 structlog>=24.1.0          # Structured logging (JSON format, better for debugging)
 
