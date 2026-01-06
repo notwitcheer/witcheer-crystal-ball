@@ -1,0 +1,44 @@
+# Witcher's Crystal Ball - Dependencies
+
+# === Core HTTP & Async ===
+httpx>=0.27.0              # Async HTTP client for API calls (faster than requests, native async)
+aiofiles>=23.2.1           # Async file operations
+
+# === Polymarket Official SDK ===
+py-clob-client>=0.1.0      # Official Polymarket CLOB client (handles auth, signing, etc.)
+
+# === Database ===
+aiosqlite>=0.19.0          # Async SQLite (pairs well with httpx for non-blocking I/O)
+
+# === Data Validation & Models ===
+pydantic>=2.5.0            # Data validation, settings management, clean dataclasses
+pydantic-settings>=2.1.0   # For loading config from .env files
+
+# === Scheduling ===
+apscheduler>=3.10.0        # Job scheduling (run scans every X seconds)
+
+# === Notifications ===
+python-telegram-bot>=21.0  # Telegram bot API (async native in v21+)
+
+# === Configuration ===
+python-dotenv>=1.0.0       # Load .env files into environment variables
+
+# === Logging ===
+structlog>=24.1.0          # Structured logging (JSON format, better for debugging)
+
+# === CLI & Display ===
+rich>=13.7.0               # Pretty console output, progress bars, tables
+
+# === Date/Time Handling ===
+python-dateutil>=2.8.2     # Flexible datetime parsing (useful for API responses)
+
+# === Development Dependencies ===
+# Uncomment these when setting up dev environment
+
+# pytest>=8.0.0            # Testing framework
+# pytest-asyncio>=0.23.0   # Async test support
+# pytest-cov>=4.1.0        # Coverage reporting
+# black>=24.1.0            # Code formatting
+# ruff>=0.2.0              # Fast linter (replaces flake8, isort)
+# mypy>=1.8.0              # Static type checking
+# ipython>=8.20.0          # Better REPL for debugging
