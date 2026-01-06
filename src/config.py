@@ -13,6 +13,10 @@ from pathlib import Path
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 class DetectionSettings(BaseSettings):
@@ -114,7 +118,21 @@ class TelegramSettings(BaseSettings):
 
 class PolymarketSettings(BaseSettings):
     """Polymarket API configuration."""
-    
+
+    # Authentication (choose one)
+    private_key: str = Field(
+        default="",
+        description="Polymarket wallet private key for authenticated API access"
+    )
+    api_key: str = Field(
+        default="",
+        description="Polymarket API key for basic API access"
+    )
+    chain_id: int = Field(
+        default=137,
+        description="Polygon chain ID (137 for mainnet, 80001 for testnet)"
+    )
+
     # Base URLs
     clob_base_url: str = Field(
         default="https://clob.polymarket.com",
@@ -124,7 +142,7 @@ class PolymarketSettings(BaseSettings):
         default="https://gamma-api.polymarket.com",
         description="Gamma API for markets, events metadata"
     )
-    
+
     # Rate limiting (be nice to their servers)
     requests_per_second: float = Field(
         default=2.0,
@@ -138,13 +156,13 @@ class PolymarketSettings(BaseSettings):
         default=1.0,
         description="Base delay for exponential backoff"
     )
-    
+
     # Request timeout
     timeout_seconds: float = Field(
         default=30.0,
         description="HTTP request timeout"
     )
-    
+
     model_config = SettingsConfigDict(
         env_prefix="POLYMARKET_"
     )

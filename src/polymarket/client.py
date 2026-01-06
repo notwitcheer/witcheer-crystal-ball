@@ -20,6 +20,9 @@ from enum import Enum
 import httpx
 import structlog
 from pydantic import BaseModel, Field
+from py_clob_client.client import ClobClient
+from py_clob_client.constants import POLYGON
+from py_clob_client.clob_types import TradeParams
 
 from ..config import get_settings, PolymarketSettings
 
@@ -155,35 +158,38 @@ class WalletPosition(BaseModel):
 class PolymarketClient:
     """
     Async client for Polymarket APIs.
-    
+
     Handles:
+    - Authenticated access using py-clob-client
     - Rate limiting (configurable requests/second)
     - Automatic retries with exponential backoff
     - Response parsing into typed models
     - Error logging
-    
+
     Usage:
         async with PolymarketClient() as client:
             trades = await client.get_recent_trades(limit=100)
             market = await client.get_market("0x...")
     """
-    
+
     def __init__(self, settings: Optional[PolymarketSettings] = None):
         """
         Initialize the client.
-        
+
         Args:
             settings: Optional custom settings. If None, loads from environment.
         """
         self.settings = settings or get_settings().polymarket
         self._client: Optional[httpx.AsyncClient] = None
-        
+        self._clob_client: Optional[ClobClient] = None
+
         # Rate limiting state
         self._request_times: list[float] = []
         self._rate_limit_lock = asyncio.Lock()
     
     async def __aenter__(self) -> "PolymarketClient":
-        """Async context manager entry - creates HTTP client."""
+        """Async context manager entry - creates HTTP and CLOB clients."""
+        # Create HTTP client for Gamma API
         self._client = httpx.AsyncClient(
             timeout=httpx.Timeout(self.settings.timeout_seconds),
             headers={
@@ -191,13 +197,66 @@ class PolymarketClient:
                 "User-Agent": "WitchersCrystalBall/1.0"
             }
         )
+
+        # Determine authentication type based on key format
+        key = self.settings.private_key or self.settings.api_key
+        if key:
+            # Check if it's a private key (0x + 64 hex chars) or API key (UUID format)
+            if key.startswith('0x') and len(key) == 66:
+                # Private key - use ClobClient with proper authentication
+                auth_success = False
+
+                # Try standard EOA wallet first (most common)
+                for signature_type, wallet_type in [(0, "EOA"), (1, "Magic")]:
+                    try:
+                        self._clob_client = ClobClient(
+                            host=self.settings.clob_base_url,
+                            key=key,
+                            chain_id=self.settings.chain_id,
+                            signature_type=signature_type
+                        )
+
+                        # CRITICAL: Set up API credentials for L2 authentication
+                        logger.debug("generating_api_creds", wallet_type=wallet_type)
+                        api_creds = self._clob_client.create_or_derive_api_creds()
+                        self._clob_client.set_api_creds(api_creds)
+
+                        logger.info(
+                            "clob_client_authenticated",
+                            auth_type="private_key",
+                            wallet_type=wallet_type,
+                            chain_id=self.settings.chain_id,
+                            api_key=api_creds.api_key[:10] + "..."
+                        )
+                        auth_success = True
+                        break
+
+                    except Exception as e:
+                        logger.warning(
+                            "clob_auth_attempt_failed",
+                            wallet_type=wallet_type,
+                            error=str(e)
+                        )
+                        self._clob_client = None
+                        continue
+
+                if not auth_success:
+                    logger.error("clob_auth_completely_failed", message="All authentication methods failed")
+            else:
+                # API key - use HTTP client with auth headers
+                self._client.headers["Authorization"] = f"Bearer {key}"
+                logger.info("api_key_mode", message="Using API key for authentication", key_format="api_key")
+        else:
+            logger.warning("no_authentication", message="No private key or API key provided - some features may be limited")
+
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit - closes HTTP client."""
         if self._client:
             await self._client.aclose()
             self._client = None
+        self._clob_client = None
     
     # =========================================================================
     # Rate Limiting
@@ -333,62 +392,133 @@ class PolymarketClient:
     ) -> list[Trade]:
         """
         Get recent trades from the CLOB API.
-        
+
         This is our primary data source for detecting suspicious activity.
-        
+
         Args:
             market_id: Filter by specific market (token_id)
             maker: Filter by specific wallet address
             limit: Number of trades to return (max usually 500)
             cursor: Pagination cursor for fetching more results
-            
+
         Returns:
             List of Trade objects, newest first
         """
-        params = {"limit": limit}
-        
-        if market_id:
-            params["market"] = market_id
-        if maker:
-            params["maker"] = maker
-        if cursor:
-            params["cursor"] = cursor
-        
-        data = await self._get(
-            self.settings.clob_base_url,
-            "/trades",
-            params=params
-        )
-        
-        trades = []
-        for item in data.get("data", data if isinstance(data, list) else []):
-            try:
-                # Parse timestamp - API returns ISO format or Unix timestamp
-                timestamp = item.get("timestamp") or item.get("created_at")
-                if isinstance(timestamp, (int, float)):
-                    timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                elif isinstance(timestamp, str):
-                    timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                
-                trade = Trade(
-                    id=str(item.get("id", "")),
-                    market=item.get("market", item.get("token_id", "")),
-                    asset_id=item.get("asset_id", ""),
-                    maker=item.get("maker", ""),
-                    taker=item.get("taker", ""),
-                    side=TradeSide(item.get("side", "BUY")),
-                    size=float(item.get("size", 0)),
-                    price=float(item.get("price", 0)),
-                    timestamp=timestamp
+        # Check if any form of authentication is available
+        key = self.settings.private_key or self.settings.api_key
+        if not self._clob_client and not key:
+            raise RuntimeError("No authentication provided - check POLYMARKET_PRIVATE_KEY or POLYMARKET_API_KEY in .env")
+
+        # Apply rate limiting
+        await self._wait_for_rate_limit()
+
+        try:
+            if self._clob_client:
+                # Use py-clob-client with private key and TradeParams
+                trade_params = TradeParams(
+                    market=market_id,
+                    maker_address=maker
                 )
-                trades.append(trade)
-                
-            except Exception as e:
-                logger.warning("trade_parse_error", error=str(e), raw_data=item)
-                continue
-        
-        logger.debug("trades_fetched", count=len(trades), market_id=market_id)
-        return trades
+
+                response = self._clob_client.get_trades(
+                    params=trade_params,
+                    next_cursor=cursor
+                )
+                trade_data = response if isinstance(response, list) else response.get("data", [])
+            else:
+                # CLOB /trades requires private key - fallback to market analysis
+                logger.warning(
+                    "no_trades_access",
+                    message="No trades API access - using market data for approximate analysis"
+                )
+                # Fallback: Create synthetic trade data from recent market changes
+                logger.info("using_fallback_mode", message="Using market analysis instead of direct trade data")
+                return await self._analyze_recent_market_activity(limit)
+
+            trades = []
+            for item in trade_data:
+                try:
+                    # Parse timestamp - API returns ISO format or Unix timestamp
+                    timestamp = item.get("timestamp") or item.get("created_at")
+                    if isinstance(timestamp, (int, float)):
+                        timestamp = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                    elif isinstance(timestamp, str):
+                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+
+                    trade = Trade(
+                        id=str(item.get("id", "")),
+                        market=item.get("market", item.get("token_id", "")),
+                        asset_id=item.get("asset_id", ""),
+                        maker=item.get("maker", ""),
+                        taker=item.get("taker", ""),
+                        side=TradeSide(item.get("side", "BUY")),
+                        size=float(item.get("size", 0)),
+                        price=float(item.get("price", 0)),
+                        timestamp=timestamp
+                    )
+                    trades.append(trade)
+
+                except Exception as e:
+                    logger.warning("trade_parse_error", error=str(e), raw_data=item)
+                    continue
+
+            logger.debug("trades_fetched", count=len(trades), market_id=market_id)
+            return trades
+
+        except Exception as e:
+            logger.error("trades_fetch_error", error=str(e), market_id=market_id)
+            # If authenticated trades fail, try fallback
+            if self._clob_client:
+                logger.warning("falling_back_to_market_analysis", error=str(e))
+                return await self._analyze_recent_market_activity(limit)
+            raise
+
+    async def _analyze_recent_market_activity(self, limit: int = 100) -> list[Trade]:
+        """
+        Fallback method: Analyze recent markets for unusual activity patterns.
+
+        Since we can't access trades directly, we'll look at markets with:
+        - Recent price changes
+        - High volume spikes
+        - New markets with sudden activity
+
+        This gives us a proxy for detecting suspicious wallet behavior.
+        """
+        # Get recent active markets from Gamma API
+        markets = await self.get_markets(active=True, limit=limit)
+
+        # Filter for markets with recent activity indicators
+        suspicious_markets = []
+        for market in markets:
+            # Look for signs of unusual activity
+            if (market.volume_24h > 1000 and  # Has some volume
+                market.volume_24h > market.volume * 0.1):  # 24h volume is significant portion of total
+                suspicious_markets.append(market)
+
+        # Convert market activity into synthetic "trade" objects for our detector
+        synthetic_trades = []
+        for market in suspicious_markets[:20]:  # Limit to top 20
+            # Create a synthetic trade representing recent market activity
+            trade = Trade(
+                id=f"synthetic_{market.id}_{int(datetime.now().timestamp())}",
+                market=market.id,
+                asset_id=market.yes_token_id or "",
+                maker="unknown_wallet",  # We don't know the actual wallet
+                taker="unknown_wallet",
+                side=TradeSide.BUY if market.yes_price > 0.5 else TradeSide.SELL,
+                size=market.volume_24h / (market.yes_price or 0.5),  # Approximate size
+                price=market.yes_price,
+                timestamp=datetime.now(timezone.utc)
+            )
+            synthetic_trades.append(trade)
+
+        logger.info(
+            "synthetic_trades_created",
+            count=len(synthetic_trades),
+            active_markets=len(markets)
+        )
+
+        return synthetic_trades
     
     async def get_wallet_positions(self, wallet_address: str) -> list[WalletPosition]:
         """
@@ -484,7 +614,9 @@ class PolymarketClient:
         )
         
         markets = []
-        for item in data.get("data", data if isinstance(data, list) else []):
+        # Gamma API returns a direct list, not wrapped in {"data": []}
+        market_data = data if isinstance(data, list) else data.get("data", [])
+        for item in market_data:
             market = self._parse_market(item)
             if market:
                 markets.append(market)
@@ -505,6 +637,37 @@ class PolymarketClient:
         )
         return data.get("data", data if isinstance(data, list) else [])
     
+    def _parse_price(self, data: dict, direct_field: str, outcome_index: int) -> float:
+        """Parse price from market data, handling both direct fields and outcome arrays."""
+        import json
+
+        # Try direct field first (e.g., "yes_price", "no_price")
+        if direct_field in data and data[direct_field] is not None:
+            try:
+                return float(data[direct_field])
+            except (ValueError, TypeError):
+                pass
+
+        # Try outcomePrices array
+        outcome_prices = data.get("outcomePrices", [0.5, 0.5])
+
+        # Handle JSON string format
+        if isinstance(outcome_prices, str):
+            try:
+                outcome_prices = json.loads(outcome_prices)
+            except json.JSONDecodeError:
+                outcome_prices = [0.5, 0.5]
+
+        # Get the specific index
+        if isinstance(outcome_prices, list) and len(outcome_prices) > outcome_index:
+            try:
+                return float(outcome_prices[outcome_index])
+            except (ValueError, TypeError):
+                pass
+
+        # Default fallback
+        return 0.5
+
     def _parse_market(self, data: dict) -> Optional[Market]:
         """Parse raw API response into Market model."""
         try:
@@ -528,8 +691,8 @@ class PolymarketClient:
                 volume=float(data.get("volume", 0)),
                 volume_24h=float(data.get("volume_24h", data.get("volume24hr", 0))),
                 liquidity=float(data.get("liquidity", 0)),
-                yes_price=float(data.get("yes_price", data.get("outcomePrices", [0.5, 0.5])[0])),
-                no_price=float(data.get("no_price", data.get("outcomePrices", [0.5, 0.5])[1] if len(data.get("outcomePrices", [])) > 1 else 0.5)),
+                yes_price=self._parse_price(data, "yes_price", 0),
+                no_price=self._parse_price(data, "no_price", 1),
                 yes_token_id=data.get("yes_token_id", data.get("clobTokenIds", [None, None])[0]),
                 no_token_id=data.get("no_token_id", data.get("clobTokenIds", [None, None])[1] if len(data.get("clobTokenIds", [])) > 1 else None)
             )
