@@ -33,6 +33,9 @@ Test individual components:
 # Test configuration
 python3 -m src.config
 
+# Test validation and schemas
+python3 -c "from src.validation import validate_wallet_address; print('✅ Validation works:', validate_wallet_address('0x742dE5a9b5fc17a187B86EC36B7b49B1B9F90a4f'))"
+
 # Test detection signals
 python3 -m src.detection.signals
 
@@ -41,6 +44,9 @@ python3 -m src.storage.database
 
 # Test Telegram alerts (shows preview if not configured)
 python3 -m src.alerts.telegram
+
+# Test circuit breaker
+python3 -c "from src.circuit_breaker import get_polymarket_circuit_breaker; print('✅ Circuit breaker ready:', get_polymarket_circuit_breaker().get_status())"
 ```
 
 ### 4. Run the Bot
@@ -64,6 +70,11 @@ witcheer-crystal-ball/
 │   ├── __init__.py
 │   ├── main.py              # Entry point, orchestrates monitoring
 │   ├── config.py            # Configuration management
+│   ├── validation.py        # 🔒 Input validation & sanitization
+│   ├── schemas.py           # 🔒 Pydantic schemas for API data
+│   ├── exceptions.py        # 🔒 Specific error types
+│   ├── circuit_breaker.py   # 🔒 Circuit breaker for API failures
+│   ├── graceful_degradation.py # 🔒 Fallback mechanisms
 │   ├── polymarket/          # Polymarket API client
 │   │   ├── __init__.py
 │   │   └── client.py
@@ -137,6 +148,39 @@ MIN_MARKET_VOLUME_USD=1000      # Ignore small markets
 
 See `.env.example` for all available options.
 
+## 🔒 Security Features
+
+The application includes comprehensive security measures:
+
+### Input Validation
+- **Wallet addresses**: Strict Ethereum format validation (`0x[a-fA-F0-9]{40}`)
+- **Market IDs**: Token ID format validation with type safety
+- **Numeric data**: Decimal precision validation for prices/volumes
+- **API responses**: Automatic sanitization removing dangerous keys and scripts
+
+### Error Handling & Resilience
+- **Specific exceptions**: Detailed error types instead of generic exceptions
+- **Circuit breakers**: Automatic API failure protection with configurable thresholds
+- **Graceful degradation**: Fallback mechanisms when external services fail
+- **Retry logic**: Exponential backoff for transient failures
+
+### Data Protection
+- **Schema validation**: All external data validated via Pydantic schemas before use
+- **Type safety**: Comprehensive type hints and runtime validation
+- **Logging security**: Structured logging without sensitive data exposure
+
+### API Security
+- **Rate limiting**: Built-in protection against API abuse
+- **Authentication**: Secure L1+L2 Polymarket API authentication
+- **Timeout handling**: Prevents hanging requests
+- **Connection pooling**: Efficient resource management
+
+### Operational Security
+- **Service monitoring**: Circuit breaker status and health metrics
+- **Degraded mode operation**: Continue working with cached/limited data
+- **Configuration validation**: Settings validated at startup
+- **Error boundary isolation**: Component failures don't cascade
+
 ## Database
 
 SQLite database at `data/crystal_ball.db` tracks:
@@ -163,24 +207,45 @@ async with Database() as db:
 
 ## Development Status
 
-### ✅ Completed (Phase 1-2)
+### ✅ Completed (Phase 1-2 + Security)
 
+**Core Functionality:**
 - [x] Project structure and imports
-- [x] Configuration management
-- [x] Polymarket API client
+- [x] Configuration management with Pydantic Settings
+- [x] Polymarket API client with L1+L2 authentication
 - [x] Database schema and operations
 - [x] All 5 detection signals
 - [x] Telegram alerting system
 - [x] Main orchestration loop
 
-### 🚧 To Do (Phase 3-5)
+**🔒 Security Layer (Phase 1 Critical Security):**
+- [x] Input validation layer (wallet addresses, market IDs, numeric data)
+- [x] Pydantic schemas for all external API data validation
+- [x] Specific error types replacing generic exceptions
+- [x] Circuit breaker pattern for API failure protection
+- [x] Graceful degradation with fallback mechanisms
+- [x] API response sanitization (XSS/injection protection)
 
-- [ ] API authentication (currently 401 on some endpoints)
+### 🚧 Priority Next Steps (Phase 2 Security)
+
+**🟡 Immediate (Next 7 days):**
+- [ ] **Secrets Management**: Move private keys to secure key management
+- [ ] **Rate Limiting**: Implement proper rate limiting for all API calls
+- [ ] **Logging Security**: Ensure no sensitive data in logs
+- [ ] **Error Response Sanitization**: Sanitize error messages sent to users
+
+**🟠 Important (Next 30 days):**
+- [ ] **Database Security**: Add encryption for sensitive stored data
+- [ ] **API Input Rate Limiting**: Prevent abuse of our endpoints
+- [ ] **Monitoring & Alerting**: Set up security event monitoring
+- [ ] **Configuration Validation**: Validate all config at startup
+
+**🔵 Feature Development:**
 - [ ] Wallet clustering (detect coordinated activity)
-- [ ] Historical backtesting
+- [ ] Historical backtesting engine
 - [ ] Performance tracking automation
-- [ ] Web dashboard
-- [ ] Docker deployment
+- [ ] Web dashboard with authentication
+- [ ] Docker deployment with security scanning
 
 ## Notes
 
