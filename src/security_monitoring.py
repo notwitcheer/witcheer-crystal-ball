@@ -19,7 +19,7 @@ from .secure_logging import get_secure_logger
 from .circuit_breaker import get_all_circuit_breakers_status
 from .rate_limiter import get_all_rate_limiter_stats
 from .exceptions import TelegramSendError, ConfigurationError
-from .alerts.telegram import TelegramNotifier
+from .alerts.telegram import TelegramAlerter
 
 logger = get_secure_logger(__name__)
 
@@ -232,10 +232,10 @@ class SecurityMonitor:
         self.alert_handlers: List[Callable[[SecurityEvent], None]] = []
 
         # Initialize Telegram notifier if enabled
-        self.telegram_notifier: Optional[TelegramNotifier] = None
+        self.telegram_notifier: Optional[TelegramAlerter] = None
         if self.config.enable_telegram_alerts:
             try:
-                self.telegram_notifier = TelegramNotifier()
+                self.telegram_notifier = TelegramAlerter()
             except Exception as e:
                 logger.warning("telegram_notifier_init_failed", error=str(e))
 

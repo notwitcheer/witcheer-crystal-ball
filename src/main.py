@@ -33,6 +33,8 @@ from .detection import InsiderDetector, SuspicionReport
 from .storage import Database
 from .alerts.telegram import TelegramAlerter
 
+# New feature modules - imported dynamically to handle missing dependencies gracefully
+
 # Initialize structured logging
 structlog.configure(
     processors=[
@@ -82,6 +84,13 @@ class CrystalBallScanner:
         self.db: Optional[Database] = None
         self.alerter: Optional[TelegramAlerter] = None
         self.detector = InsiderDetector()
+
+        # New feature modules (initialized in start())
+        self.clustering_engine: Optional[WalletClusteringEngine] = None
+        self.backtest_engine: Optional[BacktestEngine] = None
+        self.performance_tracker: Optional[PerformanceTracker] = None
+        self.anomaly_engine: Optional[AnomalyDetectionEngine] = None
+        self.dashboard_app = None
         
         # State tracking
         self._processed_trade_ids: Set[str] = set()
@@ -107,12 +116,57 @@ class CrystalBallScanner:
         # Initialize components
         self.client = PolymarketClient()
         await self.client.__aenter__()
-        
+
         self.db = Database()
         await self.db.initialize()
-        
+
         self.alerter = TelegramAlerter()
         await self.alerter.__aenter__()
+
+        # Initialize new feature modules
+        logger.info("initializing_advanced_features")
+
+        try:
+            from .clustering import get_clustering_engine
+            self.clustering_engine = await get_clustering_engine()
+            logger.info("clustering_engine_initialized")
+        except Exception as e:
+            logger.warning("clustering_engine_initialization_failed", error=str(e))
+            self.clustering_engine = None
+
+        try:
+            from .backtesting import get_backtest_engine
+            self.backtest_engine = await get_backtest_engine()
+            logger.info("backtest_engine_initialized")
+        except Exception as e:
+            logger.warning("backtest_engine_initialization_failed", error=str(e))
+            self.backtest_engine = None
+
+        try:
+            from .performance import get_performance_tracker
+            self.performance_tracker = await get_performance_tracker()
+            logger.info("performance_tracker_initialized")
+        except Exception as e:
+            logger.warning("performance_tracker_initialization_failed", error=str(e))
+            self.performance_tracker = None
+
+        try:
+            from .anomaly_detection import get_anomaly_engine
+            self.anomaly_engine = await get_anomaly_engine()
+            logger.info("anomaly_engine_initialized")
+        except Exception as e:
+            logger.warning("anomaly_engine_initialization_failed", error=str(e))
+            self.anomaly_engine = None
+
+        # Start dashboard if configured
+        if self.settings.dashboard.host:
+            try:
+                from .dashboard import create_dashboard_app
+                self.dashboard_app = await create_dashboard_app(self.settings)
+                logger.info("dashboard_initialized", host=self.settings.dashboard.host, port=self.settings.dashboard.port)
+            except Exception as e:
+                logger.warning("dashboard_initialization_failed", error=str(e))
+                self.dashboard_app = None
         
         # Send startup notification
         if self.alerter.is_configured:
@@ -224,10 +278,126 @@ class CrystalBallScanner:
         # Check if we should alert
         if report.should_alert:
             self._alerts_generated += 1
+
+            # Run additional analysis with new modules
+            await self._run_advanced_analysis(wallet, trade, market, report)
+
             return report
-        
+
         return None
-    
+
+    async def _run_advanced_analysis(self, wallet, trade, market, report: SuspicionReport):
+        """Run advanced analysis using new feature modules."""
+        try:
+            # Track alert with performance tracker
+            if self.performance_tracker:
+                await self.performance_tracker.track_alert(
+                    alert_id=report.wallet_address + "_" + trade.id,  # Create unique ID
+                    wallet_address=report.wallet_address,
+                    market_id=market.id,
+                    suspicion_score=report.total_score,
+                    position_size=trade.size_usd,
+                    entry_price=trade.price
+                )
+
+            # Check for wallet clustering
+            if self.clustering_engine:
+                clusters = await self.clustering_engine.find_coordinated_wallets(
+                    market_id=market.id,
+                    time_window_minutes=30
+                )
+                if clusters:
+                    logger.info("coordinated_activity_detected",
+                              wallet=report.wallet_address[:10],
+                              cluster_count=len(clusters))
+
+            # Run anomaly detection
+            if self.anomaly_engine:
+                anomalies = await self.anomaly_engine.scan_all_anomalies([market.id])
+                if anomalies:
+                    high_severity = [a for a in anomalies if a.severity > 0.7]
+                    if high_severity:
+                        logger.warning("high_severity_anomalies_detected",
+                                     market=market.id[:10],
+                                     anomaly_count=len(high_severity))
+
+        except Exception as e:
+            logger.error("advanced_analysis_error", error=str(e))
+
+    async def _run_periodic_analysis(self):
+        """Run comprehensive analysis periodically."""
+        try:
+            logger.info("running_periodic_analysis", scan_count=self._scan_count)
+
+            # Generate performance report
+            if self.performance_tracker:
+                try:
+                    metrics = await self.performance_tracker.get_performance_metrics(days=7)
+                    if metrics.total_alerts > 0:
+                        logger.info("performance_update",
+                                  win_rate=metrics.win_rate,
+                                  total_pnl=metrics.total_pnl,
+                                  sharpe_ratio=metrics.sharpe_ratio)
+
+                        # Send performance update via Telegram if significant
+                        if self.alerter.is_configured and abs(metrics.total_pnl) > 100:
+                            await self.alerter.send_performance_update(metrics)
+
+                except Exception as e:
+                    logger.error("performance_analysis_error", error=str(e))
+
+            # Run comprehensive anomaly detection
+            if self.anomaly_engine:
+                try:
+                    anomalies = await self.anomaly_engine.scan_all_anomalies()
+                    critical_anomalies = [a for a in anomalies if a.confidence > 0.8 and a.severity > 0.7]
+
+                    if critical_anomalies:
+                        logger.warning("critical_anomalies_detected", count=len(critical_anomalies))
+
+                        # Alert on critical anomalies
+                        if self.alerter.is_configured:
+                            for anomaly in critical_anomalies[:3]:  # Limit to top 3
+                                await self.alerter.send_anomaly_alert(anomaly)
+
+                except Exception as e:
+                    logger.error("anomaly_detection_error", error=str(e))
+
+            # Update wallet clustering analysis
+            if self.clustering_engine:
+                try:
+                    # Analyze top suspicious wallets from recent alerts
+                    suspicious_wallets = await self._get_recent_suspicious_wallets()
+                    if len(suspicious_wallets) >= 3:
+                        clusters = await self.clustering_engine.analyze_wallet_coordination(
+                            suspicious_wallets[:20]  # Analyze top 20
+                        )
+
+                        large_clusters = [c for c in clusters if len(c.wallet_addresses) >= 3]
+                        if large_clusters:
+                            logger.warning("coordination_clusters_detected",
+                                         cluster_count=len(large_clusters),
+                                         largest_cluster_size=max(len(c.wallet_addresses) for c in large_clusters))
+
+                except Exception as e:
+                    logger.error("clustering_analysis_error", error=str(e))
+
+        except Exception as e:
+            logger.error("periodic_analysis_error", error=str(e))
+
+    async def _get_recent_suspicious_wallets(self) -> list[str]:
+        """Get wallets from recent high-scoring alerts."""
+        async with self.db as db:
+            wallets = await db.fetch_all("""
+                SELECT DISTINCT wallet_address
+                FROM alerts
+                WHERE created_at >= datetime('now', '-24 hours')
+                  AND suspicion_score >= 70
+                ORDER BY suspicion_score DESC
+                LIMIT 50
+            """)
+            return [row['wallet_address'] for row in wallets]
+
     async def scan_once(self) -> list[SuspicionReport]:
         """
         Run a single scan cycle.
@@ -306,14 +476,18 @@ class CrystalBallScanner:
         while self._running:
             try:
                 await self.scan_once()
-                
+
+                # Run periodic advanced analysis (every 10th scan)
+                if self._scan_count % 10 == 0:
+                    await self._run_periodic_analysis()
+
                 # Clean up old processed IDs to prevent memory leak
                 # Keep last 10000 trade IDs
                 if len(self._processed_trade_ids) > 10000:
                     # Convert to list, keep recent half
                     ids_list = list(self._processed_trade_ids)
                     self._processed_trade_ids = set(ids_list[-5000:])
-                
+
                 # Wait for next scan
                 await asyncio.sleep(self.settings.scan_interval_seconds)
                 
@@ -495,8 +669,152 @@ async def test_components() -> None:
     console.print(f"   Fresh wallet weight: {settings.detection.weight_fresh_wallet}")
     console.print(f"   Unusual sizing weight: {settings.detection.weight_unusual_sizing}")
     console.print("   [green]✓ Detector initialized[/green]")
-    
+
+    # Test 6: Advanced Features (Module Loading)
+    console.print("\n[yellow]6. Advanced Features[/yellow]")
+    try:
+        # Test module imports without instantiation
+        from .clustering import WalletClusteringEngine
+        console.print("   [green]✓ Wallet clustering module[/green]")
+
+        from .performance import PerformanceTracker
+        console.print("   [green]✓ Performance tracking module[/green]")
+
+        from .anomaly_detection import AnomalyDetectionEngine
+        console.print("   [green]✓ Anomaly detection module[/green]")
+
+        from .backtesting import BacktestEngine
+        console.print("   [green]✓ Backtesting module[/green]")
+
+    except Exception as e:
+        console.print(f"   [red]✗ Advanced features error: {e}[/red]")
+
+    # Test 7: Web Dashboard
+    console.print("\n[yellow]7. Web Dashboard[/yellow]")
+    try:
+        from .dashboard import DashboardAuth, CrystalBallDashboard
+        # Test class instantiation without full database setup
+        auth = DashboardAuth(settings)
+        console.print(f"   Dashboard configured on {settings.dashboard.host}:{settings.dashboard.port}")
+        console.print("   [green]✓ Dashboard module ready[/green]")
+        console.print("   [yellow]ⓘ Full dashboard requires database schema updates[/yellow]")
+    except Exception as e:
+        console.print(f"   [red]✗ Dashboard error: {e}[/red]")
+
     console.print("\n[bold green]All components ready![/bold green]\n")
+
+
+async def run_backtest():
+    """Run historical backtesting analysis."""
+    console.print("\n[bold yellow]Running Backtesting Analysis...[/bold yellow]\n")
+
+    try:
+        from .backtesting import get_backtest_engine
+        backtest_engine = await get_backtest_engine()
+
+        # Run backtest on last 30 days
+        console.print("Running backtest on last 30 days of data...")
+
+        results = await backtest_engine.run_backtest(
+            start_date=datetime.now() - timedelta(days=30),
+            end_date=datetime.now(),
+            initial_balance=1000.0
+        )
+
+        # Display results
+        console.print(Panel(
+            f"[bold]Backtest Results (30 days)[/bold]\n\n"
+            f"Total Trades: {results.total_trades}\n"
+            f"Winning Trades: {results.winning_trades}\n"
+            f"Win Rate: {results.win_rate:.2%}\n"
+            f"Total Return: ${results.total_return:.2f}\n"
+            f"Sharpe Ratio: {results.sharpe_ratio:.2f}\n"
+            f"Max Drawdown: {results.max_drawdown:.2%}\n"
+            f"Final Balance: ${results.final_balance:.2f}",
+            title="📊 Backtest Results"
+        ))
+
+        # Show optimization suggestions if available
+        if hasattr(results, 'optimization_suggestions'):
+            console.print("\n[bold]Optimization Suggestions:[/bold]")
+            for suggestion in results.optimization_suggestions:
+                console.print(f"  • {suggestion}")
+
+    except Exception as e:
+        console.print(f"[red]Backtest error: {e}[/red]")
+
+
+async def run_dashboard_server():
+    """Start the web dashboard server."""
+    import uvicorn
+    from .config import get_settings
+
+    console.print("\n[bold yellow]Starting Web Dashboard...[/bold yellow]\n")
+
+    try:
+        settings = get_settings()
+        from .dashboard import create_dashboard_app
+        app = await create_dashboard_app(settings)
+
+        console.print(Panel.fit(
+            f"[bold green]Dashboard starting...[/bold green]\n\n"
+            f"URL: http://{settings.dashboard.host}:{settings.dashboard.port}\n"
+            f"Default login: admin / [check logs for password]\n\n"
+            f"Press Ctrl+C to stop",
+            title="🌐 Web Dashboard"
+        ))
+
+        # Run the server
+        uvicorn.run(
+            app,
+            host=settings.dashboard.host,
+            port=settings.dashboard.port,
+            log_level="info"
+        )
+
+    except Exception as e:
+        console.print(f"[red]Dashboard error: {e}[/red]")
+
+
+async def run_anomaly_scan():
+    """Run comprehensive anomaly detection scan."""
+    console.print("\n[bold yellow]Running Anomaly Detection Scan...[/bold yellow]\n")
+
+    try:
+        from .anomaly_detection import get_anomaly_engine
+        anomaly_engine = await get_anomaly_engine()
+
+        console.print("Scanning for anomalies across all active markets...")
+
+        anomalies = await anomaly_engine.scan_all_anomalies()
+
+        if anomalies:
+            console.print(f"\n[bold red]Found {len(anomalies)} anomalies![/bold red]\n")
+
+            # Group by type
+            by_type = {}
+            for anomaly in anomalies:
+                if anomaly.anomaly_type not in by_type:
+                    by_type[anomaly.anomaly_type] = []
+                by_type[anomaly.anomaly_type].append(anomaly)
+
+            for anomaly_type, type_anomalies in by_type.items():
+                console.print(f"\n[bold]{anomaly_type.value.title()} ({len(type_anomalies)})[/bold]:")
+
+                for anomaly in sorted(type_anomalies, key=lambda x: x.severity, reverse=True)[:5]:
+                    console.print(Panel(
+                        f"Confidence: {anomaly.confidence:.2%}\n"
+                        f"Severity: {anomaly.severity:.2%}\n"
+                        f"Affected Wallets: {len(anomaly.affected_wallets)}\n"
+                        f"Market: {anomaly.market_id or 'N/A'}\n"
+                        f"Details: {anomaly.details}",
+                        title=f"🚨 {anomaly_type.value}"
+                    ))
+        else:
+            console.print("\n[dim]No significant anomalies detected.[/dim]\n")
+
+    except Exception as e:
+        console.print(f"[red]Anomaly scan error: {e}[/red]")
 
 
 def main():
@@ -521,6 +839,21 @@ def main():
         action="store_true",
         help="Enable debug logging"
     )
+    parser.add_argument(
+        "--backtest", "-b",
+        action="store_true",
+        help="Run historical backtesting on recent data"
+    )
+    parser.add_argument(
+        "--dashboard", "--web",
+        action="store_true",
+        help="Start web dashboard server"
+    )
+    parser.add_argument(
+        "--anomaly-scan", "-a",
+        action="store_true",
+        help="Run comprehensive anomaly detection scan"
+    )
     
     args = parser.parse_args()
     
@@ -534,6 +867,12 @@ def main():
         asyncio.run(test_components())
     elif args.single:
         asyncio.run(run_single_scan())
+    elif args.backtest:
+        asyncio.run(run_backtest())
+    elif args.dashboard:
+        asyncio.run(run_dashboard_server())
+    elif args.anomaly_scan:
+        asyncio.run(run_anomaly_scan())
     else:
         asyncio.run(run_continuous())
 

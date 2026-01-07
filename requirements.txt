@@ -26,6 +26,9 @@ python-dotenv>=1.0.0       # Load .env files into environment variables
 # === Security ===
 cryptography>=42.0.0       # Encryption for secure secrets storage
 
+# === Data Analysis ===
+numpy>=1.24.0              # Numerical computing for clustering and analysis
+
 # === Logging ===
 structlog>=24.1.0          # Structured logging (JSON format, better for debugging)
 
@@ -34,6 +37,14 @@ rich>=13.7.0               # Pretty console output, progress bars, tables
 
 # === Date/Time Handling ===
 python-dateutil>=2.8.2     # Flexible datetime parsing (useful for API responses)
+
+# === Web Dashboard ===
+fastapi>=0.104.0            # Fast web framework for dashboard API
+uvicorn>=0.24.0            # ASGI server for FastAPI
+jinja2>=3.1.2              # Template engine for dashboard
+python-multipart>=0.0.6    # Form data parsing
+pyjwt>=2.8.0               # JWT token handling for authentication
+passlib[bcrypt]>=1.7.4     # Password hashing with bcrypt
 
 # === Development Dependencies ===
 # Uncomment these when setting up dev environment

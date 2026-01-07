@@ -116,6 +116,44 @@ class TelegramSettings(BaseSettings):
     )
 
 
+class DashboardSettings(BaseSettings):
+    """Web dashboard configuration."""
+
+    # Server settings
+    host: str = Field(
+        default="127.0.0.1",
+        description="Dashboard server host"
+    )
+    port: int = Field(
+        default=8080,
+        description="Dashboard server port"
+    )
+
+    # Security
+    secret_key: str = Field(
+        default="your-secret-key-change-this-in-production",
+        description="Secret key for JWT signing and session encryption"
+    )
+    allowed_hosts: str = Field(
+        default="127.0.0.1,localhost",
+        description="Comma-separated list of allowed hosts"
+    )
+    cors_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000",
+        description="Comma-separated list of allowed CORS origins"
+    )
+
+    # Authentication
+    access_token_expire_minutes: int = Field(
+        default=30,
+        description="JWT access token expiration time in minutes"
+    )
+
+    model_config = SettingsConfigDict(
+        env_prefix="DASHBOARD_"
+    )
+
+
 class PolymarketSettings(BaseSettings):
     """Polymarket API configuration."""
 
@@ -220,6 +258,7 @@ class Settings(BaseSettings):
     # Nested settings
     detection: DetectionSettings = Field(default_factory=DetectionSettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
     polymarket: PolymarketSettings = Field(default_factory=PolymarketSettings)
     
     model_config = SettingsConfigDict(
@@ -242,6 +281,11 @@ def get_settings() -> Settings:
         get_settings.cache_clear()
     """
     return Settings()
+
+
+# Backwards compatibility aliases
+Config = Settings
+load_config = get_settings
 
 
 # Quick validation when module is imported directly
