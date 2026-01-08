@@ -247,11 +247,15 @@ class CrystalBallScanner:
         self._processed_trade_ids.add(trade.id)
         self._trades_processed += 1
         
-        # Get market metadata
-        market = await self._get_market(trade.market)
-        if not market:
-            logger.debug("market_not_found", market_id=trade.market[:10])
-            return None
+        # Get market metadata (check for cached market from DataClient first)
+        if hasattr(trade, '_cached_market') and trade._cached_market:
+            market = trade._cached_market
+            logger.debug("using_cached_market", market_id=trade.market[:10])
+        else:
+            market = await self._get_market(trade.market)
+            if not market:
+                logger.debug("market_not_found", market_id=trade.market[:10])
+                return None
         
         # Apply filters
         if self._should_skip_market(market):
