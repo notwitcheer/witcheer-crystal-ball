@@ -6,6 +6,7 @@ aiofiles>=23.2.1           # Async file operations
 
 # === Polymarket Official SDK ===
 py-clob-client>=0.1.0      # Official Polymarket CLOB client (handles auth, signing, etc.)
+polymarket-apis>=0.1.0     # Official Polymarket data client (real trade data access)
 
 # === Database ===
 aiosqlite>=0.19.0          # Async SQLite (pairs well with httpx for non-blocking I/O)
