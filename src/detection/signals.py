@@ -644,7 +644,7 @@ class InsiderDetector:
             trade=trade,
             market=market,
             position_size_usd=trade.size_usd,
-            position_side="YES" if trade.price > 0.5 else "NO",  # Simplified
+            position_side=trade.outcome if trade.outcome else ("YES" if trade.price > 0.5 else "NO"),  # Use real outcome data
             price_at_detection=trade.price,
             hours_until_resolution=market.hours_until_resolution
         )

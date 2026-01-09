@@ -67,12 +67,13 @@ class Trade(BaseModel):
     
     # Trade details
     side: TradeSide
+    outcome: str = Field(default="", description="YES or NO - which outcome was bought")
     size: float = Field(description="Size in outcome tokens")
     price: float = Field(ge=0.0, le=1.0, description="Price (0-1, probability)")
-    
+
     # Timestamps
     timestamp: datetime = Field(description="When trade was executed")
-    
+
     # Computed fields (we'll calculate these)
     size_usd: float = Field(default=0.0, description="Size in USD (size * price)")
     
@@ -469,6 +470,7 @@ class PolymarketClient:
                         taker="unknown",               # DataClient doesn't provide taker
 
                         side=TradeSide(api_trade.side),
+                        outcome=api_trade.outcome,  # "Yes" or "No"
                         size=float(api_trade.size),
                         price=float(api_trade.price),
                         timestamp=api_trade.timestamp
