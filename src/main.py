@@ -28,7 +28,7 @@ from rich.progress import Progress
 
 # Proper package imports
 from .config import get_settings
-from .polymarket import PolymarketClient, Trade, Market
+from .polymarket import PolymarketClient, Trade, Market, TradeSide
 from .detection import InsiderDetector, SuspicionReport
 from .storage import Database
 from .alerts.telegram import TelegramAlerter
@@ -236,14 +236,20 @@ class CrystalBallScanner:
     async def _process_trade(self, trade: Trade) -> Optional[SuspicionReport]:
         """
         Process a single trade through the detection pipeline.
-        
+
         Returns a SuspicionReport if the trade is suspicious enough
         to alert on, None otherwise.
         """
         # Skip if already processed
         if trade.id in self._processed_trade_ids:
             return None
-        
+
+        # CRITICAL FIX: Only analyze BUY transactions
+        # SELL transactions are people exiting positions (like 98% example)
+        # We want to detect new positions/convictions, not exits
+        if trade.side == TradeSide.SELL:
+            return None
+
         self._processed_trade_ids.add(trade.id)
         self._trades_processed += 1
         

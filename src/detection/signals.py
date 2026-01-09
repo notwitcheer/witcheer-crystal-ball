@@ -685,24 +685,34 @@ class InsiderDetector:
     ) -> bool:
         """
         Quick check if a trade is worth full analysis.
-        
+
         Use this to filter trades before doing expensive database lookups
         for additional context (median sizes, timing history, etc.)
-        
+
         Returns True if the trade should be fully analyzed.
+
+        IMPROVED: More aggressive filtering to reduce false positive spam
         """
-        # Skip if wallet is well-established
-        if wallet.total_trades > 20 and wallet.days_since_first_seen > 30:
+        # Skip if wallet is well-established (more restrictive)
+        if wallet.total_trades > 10 and wallet.days_since_first_seen > 14:
             return False
-        
-        # Skip tiny trades
-        if trade.size_usd < 100:
+
+        # Skip tiny trades (increased threshold)
+        if trade.size_usd < 250:
             return False
-        
-        # Skip huge, well-known markets (unless trade is massive)
-        if market.volume > 1_000_000 and trade.size_usd < 5000:
+
+        # Skip huge, well-known markets (more restrictive thresholds)
+        if market.volume > 500_000 and trade.size_usd < 2000:
             return False
-        
+
+        # Skip very high-volume markets entirely unless trade is enormous
+        if market.volume > 2_000_000 and trade.size_usd < 10000:
+            return False
+
+        # Skip markets with very high 24h volume unless significant trade
+        if market.volume_24h > 100_000 and trade.size_usd < 1000:
+            return False
+
         return True
 
 
