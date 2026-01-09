@@ -235,9 +235,15 @@ class Database:
         
         # Enable foreign keys (SQLite has them disabled by default)
         await self._connection.execute("PRAGMA foreign_keys = ON")
-        
+
         # Use WAL mode for better concurrent read/write performance
         await self._connection.execute("PRAGMA journal_mode = WAL")
+
+        # Additional robustness settings
+        await self._connection.execute("PRAGMA synchronous = NORMAL")  # Balance safety/performance
+        await self._connection.execute("PRAGMA cache_size = 10000")    # Larger cache
+        await self._connection.execute("PRAGMA temp_store = MEMORY")   # Use memory for temp tables
+        await self._connection.execute("PRAGMA mmap_size = 268435456") # 256MB memory map
         
         # Run schema creation (idempotent due to IF NOT EXISTS)
         await self._connection.executescript(SCHEMA)

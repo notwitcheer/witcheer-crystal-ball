@@ -470,7 +470,7 @@ class PolymarketClient:
                         taker="unknown",               # DataClient doesn't provide taker
 
                         side=TradeSide(api_trade.side),
-                        outcome=api_trade.outcome,  # "Yes" or "No"
+                        outcome=getattr(api_trade, 'outcome', ''),  # "Yes" or "No" if available
                         size=float(api_trade.size),
                         price=float(api_trade.price),
                         timestamp=api_trade.timestamp
