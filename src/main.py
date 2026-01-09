@@ -275,11 +275,15 @@ class CrystalBallScanner:
         if not self.detector.quick_scan(wallet, trade, market):
             return None
         
-        # Full analysis
+        # Get additional data for advanced signal detection
+        wallet_timing_history = await self.db.get_wallet_timing_history(trade.maker)
+
+        # Full analysis with all available data
         report = self.detector.analyze(
             wallet=wallet,
             trade=trade,
-            market=market
+            market=market,
+            wallet_timing_history=wallet_timing_history
         )
         
         # Update wallet stats

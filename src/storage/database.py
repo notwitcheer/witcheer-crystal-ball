@@ -518,10 +518,24 @@ class Database:
         resolution_price: float,
         outcome: str  # 'WIN' or 'LOSS'
     ) -> None:
-        """Update alert with resolution outcome."""
+        """Update alert with resolution outcome and update wallet win rate."""
         now = datetime.now(timezone.utc)
-        
+
         async with self._get_cursor() as cursor:
+            # Get the alert to find the wallet address
+            await cursor.execute(
+                "SELECT wallet_address FROM alerts WHERE id = ?",
+                (alert_id,)
+            )
+            row = await cursor.fetchone()
+
+            if not row:
+                logger.warning("alert_not_found", alert_id=alert_id)
+                return
+
+            wallet_address = row[0]
+
+            # Update alert with outcome
             await cursor.execute(
                 """
                 UPDATE alerts
@@ -532,9 +546,14 @@ class Database:
                 """,
                 (now.isoformat(), resolution_price, outcome, alert_id)
             )
+
+            # Update wallet win/loss stats
+            won = (outcome == 'WIN')
+            await self.update_wallet_stats(wallet_address, 0.0, won)
+
             await self._connection.commit()
-        
-        logger.info("alert_resolved", alert_id=alert_id, outcome=outcome)
+
+        logger.info("alert_resolved", alert_id=alert_id, outcome=outcome, wallet=wallet_address[:10])
     
     async def get_alerts_for_wallet(
         self,
@@ -732,16 +751,33 @@ class Database:
     ) -> list[tuple[float, bool]]:
         """
         Get wallet's historical timing data for timing pattern detection.
-        
+
         Returns list of (hours_before_resolution, won) tuples.
-        
-        Note: This requires trade_history and resolved market data,
-        which may not be fully populated initially.
+
+        Uses the alerts table to get resolved trades with timing data.
         """
-        # This is a placeholder - full implementation would join
-        # trade_history with market resolution data
-        # For now, return empty list
-        return []
+        async with self._get_cursor() as cursor:
+            await cursor.execute(
+                """
+                SELECT hours_until_resolution, outcome
+                FROM alerts
+                WHERE wallet_address = ?
+                  AND hours_until_resolution IS NOT NULL
+                  AND outcome IS NOT NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (address.lower(), limit)
+            )
+            rows = await cursor.fetchall()
+
+        timing_data = []
+        for row in rows:
+            hours_until_resolution, outcome = row
+            won = (outcome == 'WIN')
+            timing_data.append((hours_until_resolution, won))
+
+        return timing_data
     
     # =========================================================================
     # Statistics & Analysis
