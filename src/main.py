@@ -304,15 +304,12 @@ class CrystalBallScanner:
         """Run advanced analysis using new feature modules."""
         try:
             # Track alert with performance tracker
-            if self.performance_tracker:
-                await self.performance_tracker.track_alert(
-                    alert_id=report.wallet_address + "_" + trade.id,  # Create unique ID
-                    wallet_address=report.wallet_address,
-                    market_id=market.id,
-                    suspicion_score=report.total_score,
-                    position_size=trade.size_usd,
-                    entry_price=trade.price
-                )
+            # TODO: Fix PerformanceTracker integration after SuspicionReport structure alignment
+            # if self.performance_tracker:
+            #     await self.performance_tracker.track_alert(
+            #         alert=report,
+            #         followed=False
+            #     )
 
             # Check for wallet clustering
             if self.clustering_engine:
