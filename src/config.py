@@ -85,6 +85,12 @@ class DetectionSettings(BaseSettings):
         description="Only alert if suspicion score >= this value (0-100)"
     )
     
+    # Trade filtering
+    max_buy_price_threshold: float = Field(
+        default=0.85,
+        description="Skip BUY trades above this price (filters out arbitrage bots)"
+    )
+
     # Signal weights (must sum to 100 for clean scoring)
     weight_fresh_wallet: int = 25
     weight_unusual_sizing: int = 20

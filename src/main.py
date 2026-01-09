@@ -250,6 +250,12 @@ class CrystalBallScanner:
         if trade.side == TradeSide.SELL:
             return None
 
+        # FILTER OUT ARBITRAGE BOTS: Skip high-price purchases (>85%)
+        # These are arbitrage bots buying at 99% for 1% guaranteed profit
+        # Real insider trades happen at lower prices for higher upside
+        if trade.price > self.settings.detection.max_buy_price_threshold:
+            return None
+
         self._processed_trade_ids.add(trade.id)
         self._trades_processed += 1
         
